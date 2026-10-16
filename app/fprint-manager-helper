@@ -1,0 +1,58 @@
+#!/bin/bash
+# Привилегированный помощник «Отпечатков пальцев». Запускается через pkexec,
+# принимает только фиксированный набор команд.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+DROPIN_DIR=/etc/systemd/system/fprintd.service.d
+DROPIN="$DROPIN_DIR/fprint-manager-debug.conf"
+CLEAR_TOOL=/opt/libfprint-egis-sdcp/libexec/clear-storage
+
+die() { echo "Ошибка: $*" >&2; exit 2; }
+
+restart_fprintd() {
+    systemctl restart fprintd.service 2>/dev/null || systemctl stop fprintd.service 2>/dev/null || true
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    pam-enable)
+        pam-auth-update --enable fprintd
+        grep -n pam_fprintd /etc/pam.d/common-auth
+        ;;
+    pam-disable)
+        pam-auth-update --disable fprintd
+        echo "pam_fprintd отключён"
+        ;;
+    restart)
+        restart_fprintd
+        echo "fprintd перезапущен"
+        ;;
+    journal)
+        journalctl -u fprintd.service -n 400 --no-pager -o short-iso
+        ;;
+    debug-on)
+        mkdir -p "$DROPIN_DIR"
+        printf '[Service]\nEnvironment=G_MESSAGES_DEBUG=all\n' > "$DROPIN"
+        systemctl daemon-reload
+        restart_fprintd
+        echo "Отладочный журнал fprintd включён"
+        ;;
+    debug-off)
+        rm -f "$DROPIN"
+        systemctl daemon-reload
+        restart_fprintd
+        echo "Отладочный журнал fprintd выключен"
+        ;;
+    clear-storage)
+        [[ -x "$CLEAR_TOOL" ]] || die "не найден $CLEAR_TOOL (установите пакет libfprint-egis-sdcp)"
+        systemctl stop fprintd.service
+        (cd "$(mktemp -d)" && echo y | "$CLEAR_TOOL")
+        # Отпечатки, которые fprintd хранит для этого драйвера, больше не существуют в чипе
+        find /var/lib/fprint -mindepth 2 -maxdepth 2 -type d -name egismoc -print -exec rm -rf {} +
+        echo "Память сенсора очищена"
+        ;;
+    *)
+        die "неизвестная команда: $cmd"
+        ;;
+esac

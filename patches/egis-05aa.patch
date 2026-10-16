@@ -1,0 +1,115 @@
+diff -ruN a/libfprint/drivers/egismoc/egismoc.c b/libfprint/drivers/egismoc/egismoc.c
+--- a/libfprint/drivers/egismoc/egismoc.c
++++ b/libfprint/drivers/egismoc/egismoc.c
+@@ -61,6 +61,7 @@
+   { .vid = 0x1c7a, .pid = 0x0587, .driver_data = EGISMOC_DRIVER_CHECK_PREFIX_TYPE1 | EGISMOC_DRIVER_MAX_ENROLL_STAGES_20 },
+   { .vid = 0x1c7a, .pid = 0x05a1, .driver_data = EGISMOC_DRIVER_CHECK_PREFIX_TYPE2 },
+   { .vid = 0x1c7a, .pid = 0x05a5, .driver_data = EGISMOC_DRIVER_CHECK_PREFIX_TYPE2 | EGISMOC_DRIVER_MAX_ENROLL_STAGES_15 },
++  { .vid = 0x1c7a, .pid = 0x05aa, .driver_data = EGISMOC_DRIVER_CHECK_PREFIX_TYPE2 | EGISMOC_DRIVER_MAX_ENROLL_STAGES_15 | EGISMOC_DRIVER_SKIP_INIT_CONTROL1_4 },
+   { .vid = 0,      .pid = 0,      .driver_data = 0 }
+ };
+ 
+@@ -143,6 +144,17 @@
+     fpi_ssm_next_state (self->task_ssm);
+ }
+ 
++
++static void
++egismoc_dbg_hex (const guchar *buf, gsize len)
++{
++  g_autoptr(GString) s = g_string_sized_new (len * 2 + 1);
++
++  for (gsize i = 0; i < len; i++)
++    g_string_append_printf (s, "%02x", buf[i]);
++  fp_dbg ("%s", s->str);
++}
++
+ static void
+ egismoc_cmd_receive_cb (FpiUsbTransfer *transfer,
+                         FpDevice       *device,
+@@ -175,6 +187,8 @@
+   callback = data->callback;
+   buffer = g_steal_pointer (&transfer->buffer);
+   actual_length = transfer->actual_length;
++  fp_dbg ("RX (%" G_GSIZE_FORMAT " bytes):", actual_length);
++  egismoc_dbg_hex (buffer, actual_length);
+ 
+   fpi_ssm_mark_completed (transfer->ssm);
+ 
+@@ -359,7 +373,14 @@
+   self->wait_finger_ssm = NULL;
+   self->wait_finger_start = 0;
+ 
+-  if (error)
++  if (!error)
++    return;
++
++  /* Fail the parent task so it is cleared too; otherwise a cancelled verify
++   * leaves task_ssm set and the next open() hits its assertion. */
++  if (self->task_ssm)
++    fpi_ssm_mark_failed (self->task_ssm, error);
++  else
+     fpi_device_action_error (device, error);
+ }
+ 
+@@ -1751,7 +1772,17 @@
+ egismoc_dev_init_handler (FpiSsm   *ssm,
+                           FpDevice *device)
+ {
+-  g_autoptr(FpiUsbTransfer) transfer = fpi_usb_transfer_new (device);
++  g_autoptr(FpiUsbTransfer) transfer = NULL;
++
++  /* ETU906 (05aa) stalls the vendor 0x20 requests; Windows only sends 0x52 */
++  if ((fpi_device_get_driver_data (device) & EGISMOC_DRIVER_SKIP_INIT_CONTROL1_4) &&
++      fpi_ssm_get_cur_state (ssm) < DEV_INIT_CONTROL5)
++    {
++      fpi_ssm_jump_to_state (ssm, DEV_INIT_CONTROL5);
++      return;
++    }
++
++  transfer = fpi_usb_transfer_new (device);
+ 
+   switch (fpi_ssm_get_cur_state (ssm))
+     {
+diff -ruN a/libfprint/drivers/egismoc/egismoc.h b/libfprint/drivers/egismoc/egismoc.h
+--- a/libfprint/drivers/egismoc/egismoc.h
++++ b/libfprint/drivers/egismoc/egismoc.h
+@@ -38,6 +38,7 @@
+ #define EGISMOC_DRIVER_CHECK_PREFIX_TYPE2 (1 << 1)
+ #define EGISMOC_DRIVER_MAX_ENROLL_STAGES_20 (1 << 2)
+ #define EGISMOC_DRIVER_MAX_ENROLL_STAGES_15 (1 << 3)
++#define EGISMOC_DRIVER_SKIP_INIT_CONTROL1_4 (1 << 4)
+ 
+ #define EGISMOC_EP_CMD_OUT (0x02 | FPI_USB_ENDPOINT_OUT)
+ #define EGISMOC_EP_CMD_IN (0x81 | FPI_USB_ENDPOINT_IN)
+diff -ruN a/libfprint/fpi-sdcp-device.c b/libfprint/fpi-sdcp-device.c
+--- a/libfprint/fpi-sdcp-device.c
++++ b/libfprint/fpi-sdcp-device.c
+@@ -664,6 +664,16 @@
+ 
+   path = fpi_sdcp_device_get_cached_claim_path (self);
+ 
++  /* The sensor keeps only the last SDCP session, so a claim cached by another
++   * process (or before suspend) may be stale and break identify. Always start
++   * a fresh connection instead of trusting the file. */
++  if (g_file_test (path, G_FILE_TEST_EXISTS))
++    {
++      fp_dbg ("Ignoring cached claim file \"%s\"", path);
++      fpi_sdcp_device_delete_cached_claim (self);
++    }
++  return NULL;
++
+   if (!g_file_test (path, G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR))
+     {
+       fp_dbg ("Cached claim file \"%s\" does not exist.", path);
+diff -ruN a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -211,6 +211,7 @@
+     'aes3500' : [ 'aeslib', 'aes3k' ],
+     'aes4000' : [ 'aeslib', 'aes3k' ],
+     'uru4000' : [ 'openssl' ],
++    'egismoc' : [ 'openssl' ],
+     'elanspi' : [ 'udev' ],
+     'virtual_image'          : [ 'virtual' ],
+     'virtual_device'         : [ 'virtual' ],

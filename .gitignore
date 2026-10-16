@@ -1,0 +1,16 @@
+# Сборка
+/dist/
+/driver/build/
+build/
+*.deb
+__pycache__/
+*.pyc
+
+# Логи и отладка: в них серийный номер сенсора и данные SDCP-сессий
+*.log
+*.pcap
+*.pcapng
+*.etl
+
+# Тестовые данные libfprint — нужны
+!/driver/tests/**
