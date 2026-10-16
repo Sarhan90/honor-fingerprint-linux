@@ -1,8 +1,10 @@
 # honor-fingerprint-linux
 
-Сканер отпечатков **Egis ETU906 (USB `1c7a:05aa`)** в Linux — тот, что встроен в кнопку питания ноутбуков Honor MagicBook (проверено на HONOR MRB, Debian 13 trixie, GNOME).
+Сканер отпечатков в Linux на **HONOR MagicBook Art 14 (2025)** — **Egis ETU906 (USB `1c7a:05aa`)**, встроенный в кнопку питания.
 
-*Fingerprint reader support for the Egis ETU906 (1c7a:05aa) on Linux: a patched libfprint with SDCP support plus a GTK 4 manager app, packaged as two `.deb` files.*
+Проверено на HONOR MagicBook Art 14 (2025), модель `MRB-XXX` (плата M1120, BIOS 2.06, Intel Core Ultra 7 255H), Debian 13 trixie, GNOME. Другие ноутбуки с тем же сенсором `1c7a:05aa`, скорее всего, тоже подойдут.
+
+*Fingerprint reader support for the HONOR MagicBook Art 14 (2025, MRB-XXX) on Linux — Egis ETU906 (1c7a:05aa): a patched libfprint with SDCP support plus a GTK 4 manager app, packaged as two `.deb` files.*
 
 Upstream libfprint этот сенсор не поддерживает: он работает только по защищённому протоколу SDCP. Здесь — форк libfprint с SDCP ([obra/libfprint-egismoc-sdcp](https://github.com/obra/libfprint-egismoc-sdcp), на основе работы Joshua Grisham) с исправлениями для ETU906 и приложение для управления отпечатками.
 
